@@ -7,12 +7,12 @@ The name and the method come from qualitative research. A codebook defines each 
 ## How it works
 
 - **The codebook** is a YAML file of questions. Every label has a plain-language definition: decision models answer accurately only once each label is defined. A question can be marked `critical: true`.
-- **Apply** sends every question about a document in one call to a decision model on a local [Ollama](https://ollama.com) server, through Ollama's own Go client (`Client.SystemOne`), and decodes yes/no (`noul`), `choice` and `score` answers into typed values.
+- **Apply** sends every question about a document in one call to a decision model through the System One API (`POST /v1/systemone`, served by [Ollama](https://ollama.com)), and decodes yes/no (`noul`), `choice` and `score` answers into typed values. The client is a small standard-library one in `internal/systemone`, with request and response types copied from Ollama (MIT; notice kept).
 - **Gates** route each answer by its confidence: accept it, ask a larger model, or ask a person. A critical yes/no question sends any answer with a probability of "true" at or above its flag threshold to a person. Answers that aren't accepted go to a disagreement log.
 - **eval** applies the codebook to a spread sample of a folder's Markdown files and writes a CSV with an empty `correct` column. A person fills it with `y` or `n`.
 - **agree** reads the labelled CSV and prints agreement by question, by folder and by confidence band, misses on critical questions, and proposed gate thresholds.
 
-Documents stay on the machine. Only models on the allowlist run; any model name containing `cloud` is refused, and so is any Ollama host that isn't a loopback address. Every result records the Ollama server version, the model's digest and the codebook's hash. Output names files and reports labels, probabilities and counts, never document text.
+Every request goes through an [egress](https://github.com/troyronda/egress) client: only loopback and the hosts, address ranges and ports in its config, and only allowlisted models; any model name containing `cloud` is refused. By default that's a local Ollama server on loopback. For an Ollama endpoint every result records the server version and the model's digest, and opening a model on a server version the tests weren't recorded against prints a warning; for other endpoints it records the endpoint and the model name each response reports. Every result records the codebook's hash. Output names files and reports labels, probabilities and counts, never document text.
 
 ## Codebook format
 
@@ -59,21 +59,43 @@ codebook run -codebook codebook.yaml -model MODEL -allow MODEL,LARGER \
 codebook eval -codebook codebook.yaml -model MODEL -allow MODEL \
   [-n 50] [-seed 1] [-max-chars 20000] [-skip attachments] -out eval.csv DIR
 
+# Another endpoint: name it, and pass an egress config that allows it.
+codebook run -codebook codebook.yaml -model MODEL -egress egress.json \
+  -endpoint https://systemone.example -endpoint-kind other \
+  -api-key-command "your-secret-tool get systemone-key" FILE...
+
 # After filling the correct column with y or n:
 codebook agree -codebook codebook.yaml [-group notes/,reading/] [-json] eval.csv
 ```
 
 `eval` leaves out hidden folders, the folders named in `-skip`, iCloud conflict copies (`name 2.md` beside `name.md`) and files changed in the last 60 seconds. It sends at most `-max-chars` characters of each file, marks cut files in the `truncated` column, and writes the run's model, digest, server version and codebook hash to `eval.csv.meta.json`.
 
+`-allow` builds a loopback-only egress config for the endpoint's port, logging to `codebook/egress.jsonl` in the user cache folder (`-egress-log` to change it). `-egress FILE` uses a full egress config instead, whose `models` are the allowlist. The endpoint can also be set in the codebook file:
+
+```yaml
+endpoint:
+  url: https://systemone.example
+  kind: other                                  # or ollama (the default)
+  api_key_command: [your-secret-tool, get, systemone-key]
+```
+
+The API key is only ever read by running that command; it never appears in a file.
+
 `run -escalate-model` asks the larger model only after the first model has finished every document, so one large model is loaded at a time. Unload the first with `ollama stop MODEL` between runs if memory is tight.
 
 ## Library
 
 ```go
-cb, err := codebook.Load("codebook.yaml")
-client, err := codebook.NewClient(codebook.DefaultHost)
-cb.Model, err = codebook.OpenModel(ctx, client, "MODEL", allowlist)
-res, err := cb.Apply(ctx, codebook.Document{Path: path, Text: text})
+cb, err := codebook.Load("codebook.yaml")      // or codebook.New(name, gate, questions)
+eg, err := egress.Load("egress.json")           // or an egress.Config built in code
+m, err := codebook.Open(ctx, codebook.Endpoint{}, eg, "MODEL") // zero Endpoint: local Ollama
+res, err := cb.WithModel(m).Apply(ctx, codebook.Document{Path: path, Text: text})
 ```
+
+`codebook.New` takes questions built in code, for callers that ask different questions at each step. `Document.State` sends a JSON value instead of text.
+
+## Tests
+
+The tests run against a fake server and against responses recorded from a local Ollama server (`testdata/recorded/<version>/`) for the made-up notes in `testdata/notes`. `TestLive` runs one note against a real server on `127.0.0.1:11434` when `CODEBOOK_LIVE_MODEL` names a model. To re-record: `go test -run TestRecorded -record -record-model MODEL`, then add the server version to `TestedVersions`.
 
 Built with the help of AI coding tools. Maintained by Troy Ronda.
