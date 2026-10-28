@@ -1,0 +1,43 @@
+# A made-up codebook for tests.
+name: garden-notes
+gate:
+  accept: 0.8
+  escalate: 0.5
+questions:
+  - name: topic
+    type: choice
+    ask: Which topic is this note mainly about?
+    labels:
+      - name: vegetables
+        definition: Growing food plants such as beans, squash or tomatoes.
+      - name: soil
+        definition: Compost, mulch, soil tests or anything about what plants grow in.
+      - name: tools
+        definition: Choosing, fixing or using garden tools.
+  - name: private
+    type: noul
+    ask: Does this note mention a neighbour by name?
+    critical: true
+    labels:
+      - name: "false"
+        definition: No neighbour is named.
+      - name: "true"
+        definition: A neighbour is named, even in passing.
+  - name: example
+    type: noul
+    ask: Does this note give a concrete example?
+    labels:
+      - name: "false"
+        definition: It stays general.
+      - name: "true"
+        definition: It describes one specific thing that happened or was tried.
+  - name: finish
+    type: score
+    ask: How finished is this note?
+    labels:
+      - name: scrap
+        definition: A fragment or a list of words.
+      - name: draft
+        definition: Full sentences with a point, but rough.
+      - name: ready
+        definition: A clear point, an example and a reason it matters.
