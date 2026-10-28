@@ -1,0 +1,15 @@
+# Binaries
+/codebook
+/bin/
+*.test
+*.out
+
+# Local runs: eval output, labelled files and logs never belong here
+*.csv
+*.jsonl
+!testdata/**/*.csv
+!testdata/**/*.jsonl
+
+.DS_Store
+go.work
+go.work.sum
