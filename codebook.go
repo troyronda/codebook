@@ -12,13 +12,14 @@ package codebook
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"regexp"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Question types, as Ollama's System One API names them.
@@ -40,9 +41,9 @@ var nameRE = regexp.MustCompile(`^[A-Za-z0-9_.-]{1,100}$`)
 // Codebook is a set of questions applied together to each document.
 type Codebook struct {
 	// Name is a short name for the codebook, for reports.
-	Name string `yaml:"name"`
+	Name string `yaml:"name" json:"name"`
 	// Gate holds the default thresholds for every question.
-	Gate Gate `yaml:"gate"`
+	Gate Gate `yaml:"gate" json:"gate"`
 	// Questions are asked in this order.
 	Questions []Question `yaml:"questions"`
 
@@ -50,7 +51,11 @@ type Codebook struct {
 	// an answer can always be traced to the exact definitions the model was given.
 	Hash string `yaml:"-"`
 
-	// Model applies the codebook. Set it with [OpenModel] before calling Apply.
+	// Endpoint, if set in the file, is where requests go unless the caller
+	// passes its own.
+	Endpoint Endpoint `yaml:"endpoint"`
+
+	// Model applies the codebook. Set it with [Open] before calling Apply.
 	Model *Model `yaml:"-"`
 }
 
@@ -58,25 +63,25 @@ type Codebook struct {
 type Question struct {
 	// Name identifies the question in answers and reports: up to 100 ASCII letters,
 	// digits, '_', '.' or '-'.
-	Name string `yaml:"name"`
+	Name string `yaml:"name" json:"name"`
 	// Type is Noul, Choice or Score.
-	Type string `yaml:"type"`
+	Type string `yaml:"type" json:"type"`
 	// Ask is the question put to the model.
-	Ask string `yaml:"ask"`
+	Ask string `yaml:"ask" json:"ask"`
 	// Labels are the possible answers, each with its definition. For Noul they are
 	// exactly "false" and "true"; for Score they run from the lowest level to the highest.
-	Labels []Label `yaml:"labels"`
+	Labels []Label `yaml:"labels" json:"labels"`
 	// Critical marks a question whose misses matter most. Its positive answers go to a
 	// person at a lower threshold, and the agreement report counts its misses separately.
-	Critical bool `yaml:"critical"`
+	Critical bool `yaml:"critical" json:"critical"`
 	// Gate overrides the codebook's thresholds for this question. Zero fields inherit.
-	Gate Gate `yaml:"gate"`
+	Gate Gate `yaml:"gate" json:"gate"`
 }
 
 // Label is one possible answer and its plain-language definition.
 type Label struct {
-	Name       string `yaml:"name"`
-	Definition string `yaml:"definition"`
+	Name       string `yaml:"name" json:"name"`
+	Definition string `yaml:"definition" json:"definition"`
 }
 
 // Load reads and validates a codebook file. It refuses a codebook with a missing
@@ -90,6 +95,27 @@ func Load(path string) (*Codebook, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
+	return c, nil
+}
+
+// New builds a codebook from questions made in code, validating them as Load
+// does. Its Hash is the SHA-256 of the JSON encoding of name, gate and
+// questions, so results still trace to the exact definitions asked.
+func New(name string, gate Gate, questions []Question) (*Codebook, error) {
+	c := &Codebook{Name: name, Gate: gate, Questions: questions}
+	if err := c.validate(); err != nil {
+		return nil, err
+	}
+	b, err := json.Marshal(struct {
+		Name      string     `json:"name"`
+		Gate      Gate       `json:"gate"`
+		Questions []Question `json:"questions"`
+	}{name, gate, questions})
+	if err != nil {
+		return nil, err
+	}
+	sum := sha256.Sum256(b)
+	c.Hash = hex.EncodeToString(sum[:])
 	return c, nil
 }
 
@@ -118,6 +144,9 @@ func (c *Codebook) validate() error {
 	}
 	if err := c.Gate.validate(); err != nil {
 		return fmt.Errorf("codebook gate: %w", err)
+	}
+	if err := c.Endpoint.validate(); err != nil {
+		return err
 	}
 	seen := map[string]bool{}
 	for i, q := range c.Questions {
@@ -191,6 +220,12 @@ func (q Question) label(name string) *Label {
 
 func isTODO(s string) bool {
 	return strings.HasPrefix(strings.TrimSpace(s), "TODO")
+}
+
+// WithModel sets the model that applies the codebook and returns c.
+func (c *Codebook) WithModel(m *Model) *Codebook {
+	c.Model = m
+	return c
 }
 
 // Question returns the question with the given name, or nil.

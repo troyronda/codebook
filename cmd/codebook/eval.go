@@ -21,6 +21,7 @@ type evalMeta struct {
 	Time          time.Time `json:"time"`
 	Codebook      string    `json:"codebook_hash"`
 	Model         string    `json:"model"`
+	Endpoint      string    `json:"endpoint"`
 	Digest        string    `json:"digest"`
 	ServerVersion string    `json:"server_version"`
 	Seed          uint64    `json:"seed"`
@@ -35,7 +36,7 @@ func evalCmd(ctx context.Context, args []string, stderr io.Writer) error {
 	fs := flag.NewFlagSet("eval", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var m modelFlags
-	m.register(fs, 20000)
+	m.register(fs, 20000, stderr)
 	n := fs.Int("n", 50, "number of files to sample")
 	seed := fs.Uint64("seed", 1, "sample `seed`; the same seed and files give the same sample")
 	skip := fs.String("skip", "attachments", "comma-separated folder `names` to leave out (\".\" leaves out files at the top level); hidden folders are always left out")
@@ -68,7 +69,7 @@ func evalCmd(ctx context.Context, args []string, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	meta := evalMeta{Time: now.UTC(), Codebook: cb.Hash, Model: cb.Model.Name, Digest: cb.Model.Digest,
+	meta := evalMeta{Time: now.UTC(), Codebook: cb.Hash, Model: cb.Model.Name, Endpoint: cb.Model.Endpoint.URL, Digest: cb.Model.Digest,
 		ServerVersion: cb.Model.ServerVersion, Seed: *seed, Files: len(files), MaxChars: m.maxChars,
 		SkippedCopies: sk.Conflict, SkippedRecent: sk.Recent}
 	for i, rel := range files {

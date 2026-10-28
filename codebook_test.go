@@ -11,9 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ollama/ollama/api"
 	"github.com/troyronda/codebook"
 	"github.com/troyronda/codebook/internal/fakeollama"
+	"github.com/troyronda/codebook/internal/systemone"
+	"github.com/troyronda/egress"
 )
 
 const (
@@ -32,15 +33,16 @@ func newServer(t *testing.T) *fakeollama.Server {
 
 func open(t *testing.T, s *fakeollama.Server, name string) *codebook.Model {
 	t.Helper()
-	c, err := codebook.NewClient(s.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := codebook.OpenModel(context.Background(), c, name, allow)
+	m, err := openWith(t, s, name, allow...)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return m
+}
+
+func openWith(t *testing.T, s *fakeollama.Server, name string, allow ...string) (*codebook.Model, error) {
+	t.Helper()
+	return codebook.Open(context.Background(), codebook.Endpoint{URL: s.URL}, s.Egress(filepath.Join(t.TempDir(), "egress.jsonl"), allow...), name)
 }
 
 func load(t *testing.T) *codebook.Codebook {
@@ -106,8 +108,7 @@ func TestCheckAllowed(t *testing.T) {
 
 func TestCloudModelNeverRuns(t *testing.T) {
 	s := newServer(t)
-	c, _ := codebook.NewClient(s.URL)
-	_, err := codebook.OpenModel(context.Background(), c, "fern-cloud", []string{"fern-cloud"})
+	_, err := openWith(t, s, "fern-cloud", "fern-cloud")
 	if !errors.Is(err, codebook.ErrNotAllowed) {
 		t.Fatalf("OpenModel(cloud) = %v, want ErrNotAllowed", err)
 	}
@@ -119,24 +120,96 @@ func TestCloudModelNeverRuns(t *testing.T) {
 func TestRemoteModelRefused(t *testing.T) {
 	s := newServer(t)
 	s.Remote[large] = true
-	c, _ := codebook.NewClient(s.URL)
-	if _, err := codebook.OpenModel(context.Background(), c, "oak", allow); !errors.Is(err, codebook.ErrNotAllowed) {
+	if _, err := openWith(t, s, "oak", allow...); !errors.Is(err, codebook.ErrNotAllowed) {
 		t.Fatalf("OpenModel(remote) = %v, want ErrNotAllowed", err)
 	}
 }
 
-func TestNewClientLoopbackOnly(t *testing.T) {
-	for host, ok := range map[string]bool{
-		"http://127.0.0.1:11434": true,
-		"http://localhost:11434": true,
-		"http://[::1]:11434":     true,
-		"http://10.0.0.5:11434":  false,
-		"https://ollama.example": false,
-		"http://0.0.0.0:11434":   false,
-	} {
-		if _, err := codebook.NewClient(host); (err == nil) != ok {
-			t.Errorf("NewClient(%q) = %v, want ok=%v", host, err, ok)
+func TestRequestsGoThroughEgress(t *testing.T) {
+	s := newServer(t)
+	eg := s.Egress(filepath.Join(t.TempDir(), "egress.jsonl"), "sprout")
+	// An endpoint the egress config doesn't allow is refused before any request.
+	for _, ep := range []string{"http://192.0.2.5:11434", "https://ollama.example"} {
+		_, err := codebook.Open(context.Background(), codebook.Endpoint{URL: ep}, eg, "sprout")
+		if !errors.Is(err, egress.ErrRefused) {
+			t.Errorf("Open(%s) = %v, want an egress refusal", ep, err)
 		}
+	}
+	// The allowed server works, and every request is in the egress log.
+	m, err := codebook.Open(context.Background(), codebook.Endpoint{URL: s.URL}, eg, "sprout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := load(t).WithModel(m).Apply(context.Background(), codebook.Document{Path: "a.md", Text: "beans"}); err != nil {
+		t.Fatal(err)
+	}
+	log, _ := os.ReadFile(eg.Log)
+	for _, path := range []string{"/api/version", "/api/tags", "/v1/systemone"} {
+		if !strings.Contains(string(log), `"path":"`+path+`"`) {
+			t.Errorf("egress log has no %s request", path)
+		}
+	}
+	if strings.Contains(string(log), "beans") {
+		t.Error("egress log holds document text")
+	}
+}
+
+func TestVersionWarning(t *testing.T) {
+	m := open(t, newServer(t), "sprout")
+	if len(m.Warnings) != 1 || !strings.Contains(m.Warnings[0], fakeollama.Version) {
+		t.Errorf("warnings %v, want one about the untested fake version", m.Warnings)
+	}
+}
+
+func TestOtherEndpoint(t *testing.T) {
+	s := newServer(t)
+	s.Models["sprout"] = "" // no provenance lookups happen for other endpoints
+	ep := codebook.Endpoint{URL: s.URL, Kind: codebook.KindOther, APIKeyCommand: []string{"echo", "made-up-key"}}
+	m, err := codebook.Open(context.Background(), ep, s.Egress(filepath.Join(t.TempDir(), "e.jsonl"), "sprout"), "sprout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	r, err := load(t).WithModel(m).Apply(context.Background(), codebook.Document{Path: "a.md", Text: "beans"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r.Endpoint != s.URL || r.ReportedModel != "sprout" || r.Digest != "" || r.ServerVersion != "" {
+		t.Errorf("provenance: %+v", r)
+	}
+	if got := s.Auth(); got != "Bearer made-up-key" {
+		t.Errorf("Authorization %q", got)
+	}
+}
+
+func TestAPIKeyCommandFailure(t *testing.T) {
+	s := newServer(t)
+	ep := codebook.Endpoint{URL: s.URL, APIKeyCommand: []string{"false"}}
+	if _, err := codebook.Open(context.Background(), ep, s.Egress(filepath.Join(t.TempDir(), "e.jsonl"), "sprout"), "sprout"); err == nil {
+		t.Error("a failing key command was ignored")
+	}
+}
+
+func TestQuestionsBuiltInCode(t *testing.T) {
+	qs := []codebook.Question{{Name: "ripe", Type: codebook.Noul, Ask: "Is the fruit ripe?",
+		Labels: []codebook.Label{{Name: "false", Definition: "Still green."}, {Name: "true", Definition: "Soft and coloured."}}}}
+	cb, err := codebook.New("tick", codebook.Gate{}, qs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, _ := codebook.New("tick", codebook.Gate{}, qs)
+	if len(cb.Hash) != 64 || cb.Hash != again.Hash {
+		t.Errorf("hash %q, %q", cb.Hash, again.Hash)
+	}
+	if _, err := codebook.New("tick", codebook.Gate{}, []codebook.Question{{Name: "x", Type: codebook.Noul, Ask: "TODO"}}); err == nil {
+		t.Error("an invalid question was accepted")
+	}
+	m := open(t, newServer(t), "sprout")
+	r, err := cb.WithModel(m).Apply(context.Background(), codebook.Document{Path: "tick-7", State: json.RawMessage(`{"fruit":"pear","day":7}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(r.Answers) != 1 || r.Chars != 0 || r.Truncated {
+		t.Errorf("result %+v", r)
 	}
 }
 
@@ -145,15 +218,14 @@ func TestOpenModelRecordsVersionAndDigest(t *testing.T) {
 	if m.ServerVersion != fakeollama.Version || m.Digest != "sha256:aaa" {
 		t.Fatalf("got version %q digest %q", m.ServerVersion, m.Digest)
 	}
-	c, _ := codebook.NewClient(newServer(t).URL)
-	if _, err := codebook.OpenModel(context.Background(), c, "sprout:big", []string{"sprout:big"}); err == nil {
+	if _, err := openWith(t, newServer(t), "sprout:big", "sprout:big"); err == nil {
 		t.Fatal("opened a model the server doesn't have")
 	}
 }
 
 // fixed answers by question, for checking decoding and gates.
 func fixed(answers map[string]any) fakeollama.AnswerFunc {
-	return func(_, _, name string, _ api.SystemOneQuestion) any { return answers[name] }
+	return func(_, _, name string, _ systemone.SystemOneQuestion) any { return answers[name] }
 }
 
 func TestApply(t *testing.T) {
@@ -237,7 +309,7 @@ func TestApply(t *testing.T) {
 
 func TestApplyRejectsWrongAnswer(t *testing.T) {
 	s := newServer(t)
-	s.Answer = func(_, _, name string, q api.SystemOneQuestion) any {
+	s.Answer = func(_, _, name string, q systemone.SystemOneQuestion) any {
 		if name == "topic" {
 			return fakeollama.Choice([]string{"weeds", "soil"}, 0, 0.9)
 		}
@@ -252,7 +324,7 @@ func TestApplyRejectsWrongAnswer(t *testing.T) {
 
 func TestEscalateAndLog(t *testing.T) {
 	s := newServer(t)
-	s.Answer = func(model, _, name string, _ api.SystemOneQuestion) any {
+	s.Answer = func(model, _, name string, _ systemone.SystemOneQuestion) any {
 		switch name {
 		case "topic": // escalated; the larger model agrees
 			return fakeollama.Choice([]string{"vegetables", "soil", "tools"}, 0, 0.9)

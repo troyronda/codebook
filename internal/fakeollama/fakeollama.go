@@ -10,10 +10,13 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strconv"
 	"sync"
 
-	"github.com/ollama/ollama/api"
+	"github.com/troyronda/egress"
+
+	"github.com/troyronda/codebook/internal/systemone"
 )
 
 // Version is the server version the fake reports.
@@ -21,7 +24,7 @@ const Version = "0.0.0-fake"
 
 // AnswerFunc answers one question about state. It returns the answer object as the
 // server would send it.
-type AnswerFunc func(model, state, name string, q api.SystemOneQuestion) any
+type AnswerFunc func(model, state, name string, q systemone.SystemOneQuestion) any
 
 // Server is a fake Ollama server.
 type Server struct {
@@ -34,7 +37,8 @@ type Server struct {
 	Answer AnswerFunc
 
 	mu       sync.Mutex
-	requests []api.SystemOneRequest
+	requests []systemone.SystemOneRequest
+	auth     string
 }
 
 // New starts a fake server with the given models. Close it when done.
@@ -45,9 +49,17 @@ func New(models map[string]string) *Server {
 		writeJSON(w, map[string]string{"version": Version})
 	})
 	mux.HandleFunc("GET /api/tags", func(w http.ResponseWriter, r *http.Request) {
-		var list api.ListResponse
+		type model struct {
+			Name       string `json:"name"`
+			Model      string `json:"model"`
+			Digest     string `json:"digest"`
+			RemoteHost string `json:"remote_host,omitempty"`
+		}
+		var list struct {
+			Models []model `json:"models"`
+		}
 		for name, digest := range s.Models {
-			m := api.ListModelResponse{Name: name, Model: name, Digest: digest}
+			m := model{Name: name, Model: name, Digest: digest}
 			if s.Remote[name] {
 				m.RemoteHost = "https://remote.example"
 			}
@@ -60,21 +72,37 @@ func New(models map[string]string) *Server {
 	return s
 }
 
-// Requests returns the System One requests received so far.
-func (s *Server) Requests() []api.SystemOneRequest {
+// Egress returns an egress config that allows this server's port and the
+// given models, logging to log.
+func (s *Server) Egress(log string, models ...string) egress.Config {
+	u, _ := url.Parse(s.URL)
+	p, _ := strconv.Atoi(u.Port())
+	return egress.Config{Ports: []uint16{uint16(p)}, Models: models, Log: log}
+}
+
+// Auth returns the Authorization header of the last System One request.
+func (s *Server) Auth() string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]api.SystemOneRequest(nil), s.requests...)
+	return s.auth
+}
+
+// Requests returns the System One requests received so far.
+func (s *Server) Requests() []systemone.SystemOneRequest {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]systemone.SystemOneRequest(nil), s.requests...)
 }
 
 func (s *Server) systemOne(w http.ResponseWriter, r *http.Request) {
-	var req api.SystemOneRequest
+	var req systemone.SystemOneRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
 		return
 	}
 	s.mu.Lock()
 	s.requests = append(s.requests, req)
+	s.auth = r.Header.Get("Authorization")
 	s.mu.Unlock()
 	if _, ok := s.Models[req.Model]; !ok {
 		if _, ok := s.Models[req.Model+":latest"]; !ok {
@@ -87,13 +115,13 @@ func (s *Server) systemOne(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(req.State, &state); err != nil {
 		state = string(req.State)
 	}
-	answers := &api.SystemOneAnswers{}
+	answers := &systemone.SystemOneAnswers{}
 	for name, q := range req.Questions.All() {
 		b, _ := json.Marshal(s.Answer(req.Model, state, name, q))
 		answers.Set(name, b)
 	}
-	writeJSON(w, api.SystemOneResponse{Model: req.Model, Answers: answers,
-		Usage: api.SystemOneUsage{InputTokens: len(state) / 4, OutputTokens: 1}})
+	writeJSON(w, systemone.SystemOneResponse{Model: req.Model, Answers: answers,
+		Usage: systemone.SystemOneUsage{InputTokens: len(state) / 4, OutputTokens: 1}})
 }
 
 func writeJSON(w http.ResponseWriter, v any) {
@@ -103,7 +131,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 // Hashed answers from a hash of the model, state and question, so every answer is
 // fixed but they differ between documents and models.
-func Hashed(model, state, name string, q api.SystemOneQuestion) any {
+func Hashed(model, state, name string, q systemone.SystemOneQuestion) any {
 	sum := sha256.Sum256([]byte(model + "\x00" + state + "\x00" + name))
 	u := float64(binary.BigEndian.Uint64(sum[:8])>>11) / (1 << 53)
 	switch q.Type {
@@ -172,7 +200,7 @@ func round(v float64) float64 { return math.Round(v*1e4) / 1e4 }
 
 // orderedKeys returns a JSON object's keys in their order in the source.
 func orderedKeys(obj json.RawMessage) []string {
-	m := &api.SystemOneAnswers{} // any ordered map of raw values will do
+	m := &systemone.SystemOneAnswers{} // any ordered map of raw values will do
 	if err := json.Unmarshal(obj, m); err != nil {
 		return nil
 	}

@@ -1,8 +1,8 @@
 // Command codebook applies a codebook to documents with local models and measures how
 // far to trust the answers.
 //
-//	codebook run   -codebook FILE -model NAME -allow NAMES [FILE...]
-//	codebook eval  -codebook FILE -model NAME -allow NAMES -out FILE.csv DIR
+//	codebook run   -codebook FILE -model NAME (-allow NAMES | -egress FILE) [FILE...]
+//	codebook eval  -codebook FILE -model NAME (-allow NAMES | -egress FILE) -out FILE.csv DIR
 //	codebook agree -codebook FILE [-group PREFIXES] FILE.csv
 //
 // run applies the codebook to the files named as arguments, or to the paths read one
@@ -20,11 +20,16 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/netip"
+	"net/url"
 	"os"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/troyronda/codebook"
+	"github.com/troyronda/egress"
 )
 
 func main() {
@@ -39,8 +44,8 @@ func main() {
 }
 
 const usage = `usage:
-  codebook run   -codebook FILE -model NAME -allow NAMES [FILE...]
-  codebook eval  -codebook FILE -model NAME -allow NAMES -out FILE.csv DIR
+  codebook run   -codebook FILE -model NAME (-allow NAMES | -egress FILE) [FILE...]
+  codebook eval  -codebook FILE -model NAME (-allow NAMES | -egress FILE) -out FILE.csv DIR
   codebook agree -codebook FILE [-group PREFIXES] FILE.csv
 Run "codebook <command> -h" for a command's flags.`
 
@@ -66,28 +71,36 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 
 // modelFlags are the flags shared by run and eval.
 type modelFlags struct {
-	codebook, model, allow, host string
-	maxChars                     int
+	codebook, model, allow     string
+	endpoint, kind, keyCommand string
+	egressPath, egressLog      string
+	maxChars                   int
+	stderr                     io.Writer
 }
 
-func (m *modelFlags) register(fs *flag.FlagSet, maxChars int) {
+func (m *modelFlags) register(fs *flag.FlagSet, maxChars int, stderr io.Writer) {
+	m.stderr = stderr
 	fs.StringVar(&m.codebook, "codebook", "", "codebook `file` (YAML)")
-	fs.StringVar(&m.model, "model", "", "decision model `name` on the local Ollama server")
-	fs.StringVar(&m.allow, "allow", "", "comma-separated model `names` allowed to run; names containing \"cloud\" are always refused")
-	fs.StringVar(&m.host, "host", codebook.DefaultHost, "Ollama server `URL`; must be a loopback address")
+	fs.StringVar(&m.model, "model", "", "decision model `name`")
+	fs.StringVar(&m.allow, "allow", "", "comma-separated model `names` allowed to run, for the built-in loopback-only egress config; names containing \"cloud\" are always refused")
+	fs.StringVar(&m.endpoint, "endpoint", "", "System One server base `URL` (default: the codebook's endpoint, else "+codebook.DefaultURL+")")
+	fs.StringVar(&m.kind, "endpoint-kind", "", "`kind` of server: ollama (records version and digest) or other")
+	fs.StringVar(&m.keyCommand, "api-key-command", "", "`command` that prints the endpoint's API key (split on spaces; no shell)")
+	fs.StringVar(&m.egressPath, "egress", "", "egress config `file` (JSON) naming allowed hosts, address ranges, ports, models and the log; replaces -allow")
+	fs.StringVar(&m.egressLog, "egress-log", "", "egress log `file` for the built-in config (default: codebook/egress.jsonl in the user cache folder)")
 	fs.IntVar(&m.maxChars, "max-chars", maxChars, "send at most `n` characters of each document (0: all)")
 }
 
 // open loads the codebook and opens its model.
 func (m *modelFlags) open(ctx context.Context) (*codebook.Codebook, error) {
-	if m.codebook == "" || m.model == "" || m.allow == "" {
-		return nil, errors.New("-codebook, -model and -allow are required")
+	if m.codebook == "" || m.model == "" {
+		return nil, errors.New("-codebook and -model are required")
 	}
 	cb, err := codebook.Load(m.codebook)
 	if err != nil {
 		return nil, err
 	}
-	model, err := m.openModel(ctx, m.model)
+	model, err := m.openModel(ctx, cb, m.model)
 	if err != nil {
 		return nil, err
 	}
@@ -95,17 +108,71 @@ func (m *modelFlags) open(ctx context.Context) (*codebook.Codebook, error) {
 	return cb, nil
 }
 
-func (m *modelFlags) openModel(ctx context.Context, name string) (*codebook.Model, error) {
-	client, err := codebook.NewClient(m.host)
+func (m *modelFlags) openModel(ctx context.Context, cb *codebook.Codebook, name string) (*codebook.Model, error) {
+	ep := codebook.Endpoint{URL: m.endpoint, Kind: m.kind, APIKeyCommand: strings.Fields(m.keyCommand)}.Or(cb.Endpoint)
+	eg, err := m.egressConfig(ep)
 	if err != nil {
 		return nil, err
 	}
-	model, err := codebook.OpenModel(ctx, client, name, splitList(m.allow))
+	model, err := codebook.Open(ctx, ep, eg, name)
 	if err != nil {
 		return nil, err
+	}
+	for _, w := range model.Warnings {
+		fmt.Fprintln(m.stderr, "codebook: warning:", w)
 	}
 	model.MaxChars = m.maxChars
 	return model, nil
+}
+
+// egressConfig loads -egress, or builds a loopback-only config for the
+// endpoint's port and the -allow models.
+func (m *modelFlags) egressConfig(ep codebook.Endpoint) (egress.Config, error) {
+	if m.egressPath != "" {
+		if m.allow != "" {
+			return egress.Config{}, errors.New("use -egress or -allow, not both: the egress config's models are the allowlist")
+		}
+		cfg, err := egress.Load(m.egressPath)
+		if err != nil {
+			return cfg, err
+		}
+		if m.egressLog != "" {
+			cfg.Log = m.egressLog
+		}
+		return cfg, nil
+	}
+	if m.allow == "" {
+		return egress.Config{}, errors.New("-allow (or an -egress config) is required")
+	}
+	u, err := url.Parse(ep.URL)
+	if err != nil {
+		return egress.Config{}, err
+	}
+	if h := u.Hostname(); h != "localhost" {
+		if ip, err := netip.ParseAddr(h); err != nil || !ip.Unmap().IsLoopback() {
+			return egress.Config{}, fmt.Errorf("endpoint %s is not on this machine; pass an -egress config that allows it", ep.URL)
+		}
+	}
+	port := u.Port()
+	if port == "" {
+		port = map[string]string{"http": "80", "https": "443"}[u.Scheme]
+	}
+	p, err := strconv.ParseUint(port, 10, 16)
+	if err != nil {
+		return egress.Config{}, fmt.Errorf("endpoint port %q: %w", port, err)
+	}
+	log := m.egressLog
+	if log == "" {
+		dir, err := os.UserCacheDir()
+		if err != nil {
+			return egress.Config{}, fmt.Errorf("no -egress-log and no user cache folder: %w", err)
+		}
+		if err := os.MkdirAll(filepath.Join(dir, "codebook"), 0o700); err != nil {
+			return egress.Config{}, err
+		}
+		log = filepath.Join(dir, "codebook", "egress.jsonl")
+	}
+	return egress.Config{Ports: []uint16{uint16(p)}, Models: splitList(m.allow), Log: log}, nil
 }
 
 func splitList(s string) []string {

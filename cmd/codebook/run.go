@@ -18,7 +18,7 @@ func runCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	var m modelFlags
-	m.register(fs, 0)
+	m.register(fs, 0, stderr)
 	logPath := fs.String("log", "", "append answers the gates didn't accept to this disagreement log `file` (JSON lines)")
 	larger := fs.String("escalate-model", "", "ask this larger `model` about escalated answers, in a second pass after the first model finishes")
 	if err := fs.Parse(args); err != nil {
@@ -31,7 +31,7 @@ func runCmd(ctx context.Context, args []string, stdin io.Reader, stdout, stderr 
 	// Check the larger model before the first pass, so a refused one costs nothing.
 	var big *codebook.Model
 	if *larger != "" {
-		if big, err = m.openModel(ctx, *larger); err != nil {
+		if big, err = m.openModel(ctx, cb, *larger); err != nil {
 			return err
 		}
 	}

@@ -10,8 +10,6 @@ import (
 	"math"
 	"strconv"
 	"unicode/utf8"
-
-	"github.com/ollama/ollama/api"
 )
 
 // Document is one document to code. Path identifies it in results; Text is never
@@ -19,6 +17,10 @@ import (
 type Document struct {
 	Path string
 	Text string
+	// State, if set, is sent to the model as is instead of Text (a JSON value,
+	// for callers asking about structured state rather than a text). MaxChars
+	// does not apply to it.
+	State json.RawMessage
 }
 
 // Result is a model's answers to every question for one document. It holds hashes and
@@ -28,8 +30,10 @@ type Result struct {
 	DocHash       string `json:"doc_hash"`      // SHA-256 of the full text, in lowercase hex
 	CodebookHash  string `json:"codebook_hash"` // see Codebook.Hash
 	Model         string `json:"model"`
-	Digest        string `json:"digest"`
-	ServerVersion string `json:"server_version"`
+	Endpoint      string `json:"endpoint"`
+	ReportedModel string `json:"reported_model"` // the model name the response reported
+	Digest        string `json:"digest,omitempty"`
+	ServerVersion string `json:"server_version,omitempty"`
 	// Chars is how many characters were sent; Truncated is set when that was fewer than
 	// the document's length.
 	Chars        int      `json:"chars"`
@@ -101,20 +105,30 @@ func (c *Codebook) Apply(ctx context.Context, doc Document) (*Result, error) {
 }
 
 func (c *Codebook) apply(ctx context.Context, m *Model, doc Document) (*Result, error) {
-	if m == nil || m.client == nil {
-		return nil, errors.New("codebook has no model; open one with OpenModel")
+	if m == nil || m.ask == nil {
+		return nil, errors.New("codebook has no model; open one with Open")
 	}
-	sum := sha256.Sum256([]byte(doc.Text))
-	text, truncated := truncate(doc.Text, m.MaxChars)
-	state, err := json.Marshal(text)
-	if err != nil {
-		return nil, err
+	var (
+		sum       [32]byte
+		state     json.RawMessage
+		chars     int
+		truncated bool
+	)
+	if doc.State != nil {
+		sum = sha256.Sum256(doc.State)
+		state = doc.State
+	} else {
+		sum = sha256.Sum256([]byte(doc.Text))
+		var text string
+		text, truncated = truncate(doc.Text, m.MaxChars)
+		chars = utf8.RuneCountInString(text)
+		b, err := json.Marshal(text)
+		if err != nil {
+			return nil, err
+		}
+		state = b
 	}
-	resp, err := m.client.SystemOne(ctx, &api.SystemOneRequest{
-		Model:     m.Name,
-		State:     state,
-		Questions: c.questions(),
-	})
+	resp, err := m.ask.ask(ctx, m.Name, state, c.questions())
 	if err != nil {
 		// The server's error never includes the state, but the path is all we add.
 		return nil, fmt.Errorf("%s: %w", doc.Path, err)
@@ -124,15 +138,17 @@ func (c *Codebook) apply(ctx context.Context, m *Model, doc Document) (*Result, 
 		DocHash:       hex.EncodeToString(sum[:]),
 		CodebookHash:  c.Hash,
 		Model:         m.Name,
+		Endpoint:      m.Endpoint.URL,
+		ReportedModel: resp.Model,
 		Digest:        m.Digest,
 		ServerVersion: m.ServerVersion,
-		Chars:         utf8.RuneCountInString(text),
+		Chars:         chars,
 		Truncated:     truncated,
-		InputTokens:   resp.Usage.InputTokens,
-		OutputTokens:  resp.Usage.OutputTokens,
+		InputTokens:   resp.InputTokens,
+		OutputTokens:  resp.OutputTokens,
 	}
 	for _, q := range c.Questions {
-		raw, ok := resp.Answers.Get(q.Name)
+		raw, ok := resp.Answers[q.Name]
 		if !ok {
 			return nil, fmt.Errorf("%s: no answer to %q", doc.Path, q.Name)
 		}
@@ -147,8 +163,8 @@ func (c *Codebook) apply(ctx context.Context, m *Model, doc Document) (*Result, 
 }
 
 // questions builds the request's questions in codebook order.
-func (c *Codebook) questions() *api.SystemOneQuestions {
-	qs := &api.SystemOneQuestions{}
+func (c *Codebook) questions() []wireQuestion {
+	qs := make([]wireQuestion, 0, len(c.Questions))
 	for _, q := range c.Questions {
 		instr, _ := json.Marshal(q.Ask)
 		var crit json.RawMessage
@@ -171,7 +187,7 @@ func (c *Codebook) questions() *api.SystemOneQuestions {
 			}
 			crit = append(buf, '}')
 		}
-		qs.Set(q.Name, api.SystemOneQuestion{Type: q.Type, Instructions: instr, Criteria: crit})
+		qs = append(qs, wireQuestion{Name: q.Name, Type: q.Type, Instructions: instr, Criteria: crit})
 	}
 	return qs
 }
