@@ -1,0 +1,17 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  go:
+    uses: troyronda/.github/.github/workflows/go.yml@98047f57352e7c966f6ec5eb431fa0bb38e08139 # v0.1.0
+  private-terms:
+    uses: troyronda/.github/.github/workflows/private-terms.yml@98047f57352e7c966f6ec5eb431fa0bb38e08139 # v0.1.0
+    secrets:
+      PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}

@@ -1,28 +1,27 @@
-# Rules for agents working in this repository
+# Agents working in this repo
 
-This repository is public from its first commit. Git history keeps everything, and Go's module proxy caches a tagged version permanently once anyone fetches it.
+A library and command that apply a codebook to documents with decision models and measure how far to trust the answers. Public.
 
-## Data
+## Build and test
 
-- Documents passed to this tool are processed only by local models through an Ollama server on the same machine. Never add a code path that sends document text to a hosted service.
-- Never put document text in logs, errors, metrics or anything that leaves the machine. Output names files and reports labels, probabilities and counts.
-- Only models on the caller's allowlist run. Any model name containing `cloud` is refused, even if it is listed.
-- Record the Ollama server version and each model's digest on every run.
-- Test fixtures are made-up documents only. Never commit real notes, eval output, labelled files, logs or anyone's configuration.
-- Nothing here names a person's paths, Keychain items, schedules, models or projects. Those belong in the caller's own configuration.
+```sh
+go build ./...
+go test -race ./...
+CODEBOOK_LIVE_MODEL=<model> go test -run TestLive .   # against a local Ollama server
+```
 
-## Git
+CI (`.github/workflows/ci.yml`) runs the shared `go` and `private-terms` workflows from `troyronda/.github` on every pull request: gofmt, a `go mod tidy` diff, `go vet`, staticcheck, govulncheck, the race tests, gitleaks and the private-terms check.
 
-- Work on branches and open pull requests; the maintainer merges.
-- Ask before every push.
-- No attribution anywhere: no `Co-Authored-By` trailers, no "Generated with" lines, no session links.
-- Tags stay at `v0.x`, and a tag is made only after every check passes.
-- Enable the hooks once per clone: `git config core.hooksPath .githooks`.
+## Layout
 
-## Go
+- One module at the repo root. The `codebook` package is the root; the command is in `cmd/codebook/`; everything else is in `internal/` (`systemone` is the System One client, `sample` picks eval files, `fakeollama` and `testvault` serve tests). No `pkg/`.
+- `asker.go` is the only file that knows which System One client is used.
+- Package names are short, lowercase, singular nouns. Don't create a package before it has code.
+- `go.work` is never committed; CI builds from `go.mod`.
 
-- One module at the repository root. Commands in `cmd/<name>/`; everything else in the root package or `internal/` until another module needs it. No `pkg/`.
-- Package names are short, lowercase, singular nouns named for what they provide (no `util`, `common`, `tools` or plurals). Don't create a package before it has code.
-- `go.work` is never committed. CI builds from `go.mod`.
-- Adopt before building: prefer a maintained library to new code, and pin its version.
-- Before a pull request: `gofmt`, `go vet`, `staticcheck`, `govulncheck`, `go test -race ./...` and `go mod tidy` with no diff.
+## Rules
+
+- Test fixtures are made-up notes only. Recorded responses in `testdata/recorded/` come from asking a local server about those notes, never real ones.
+- No secrets in the repo, in tests or in logs. Output, errors and logs never include document text. API keys are read only by running a configured command.
+- Dependencies: the standard library, official SDKs, or widely used and maintained libraries, pinned in `go.mod`. No dependency on small single-maintainer repositories.
+- Tags stay at `v0.x`, are made only after every check passes, and never move.
