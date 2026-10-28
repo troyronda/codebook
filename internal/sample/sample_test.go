@@ -54,6 +54,20 @@ func TestFiles(t *testing.T) {
 	}
 }
 
+func TestSkipRootFiles(t *testing.T) {
+	root := testvault.Copy(t, "../../testdata/notes")
+	got, _, err := sample.Files(root, sample.Options{N: 100, Skip: []string{"attachments", "."}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if slices.Contains(got, "inbox-note.md") {
+		t.Errorf("files at the root were sampled with Skip \".\": %v", got)
+	}
+	if len(got) != 6 {
+		t.Errorf("got %d files, want the 6 in folders", len(got))
+	}
+}
+
 func TestConflictNameWithoutOriginal(t *testing.T) {
 	root := t.TempDir()
 	// "Chapter 2.md" with no "Chapter.md" beside it is an ordinary note.

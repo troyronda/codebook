@@ -19,6 +19,7 @@ type Options struct {
 	// Seed makes the sample repeatable.
 	Seed uint64
 	// Skip names folders to leave out wherever they appear, such as "attachments".
+	// "." leaves out the files directly in root (a vault's README and the like).
 	// Hidden folders and files are always left out.
 	Skip []string
 	// Settle leaves out files changed within this long of Now, which may still be
@@ -91,6 +92,8 @@ func Files(root string, o Options) ([]string, Skipped, error) {
 		top := "."
 		if i := strings.IndexByte(rel, '/'); i >= 0 {
 			top = rel[:i]
+		} else if slices.Contains(o.Skip, ".") {
+			return nil
 		}
 		groups[top] = append(groups[top], rel)
 		return nil

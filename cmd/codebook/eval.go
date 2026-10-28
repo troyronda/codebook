@@ -38,7 +38,7 @@ func evalCmd(ctx context.Context, args []string, stderr io.Writer) error {
 	m.register(fs, 20000)
 	n := fs.Int("n", 50, "number of files to sample")
 	seed := fs.Uint64("seed", 1, "sample `seed`; the same seed and files give the same sample")
-	skip := fs.String("skip", "attachments", "comma-separated folder `names` to leave out; hidden folders are always left out")
+	skip := fs.String("skip", "attachments", "comma-separated folder `names` to leave out (\".\" leaves out files at the top level); hidden folders are always left out")
 	out := fs.String("out", "", "write the CSV to this `file`; it must not exist")
 	if err := fs.Parse(args); err != nil {
 		return err
