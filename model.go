@@ -19,7 +19,7 @@ const DefaultHost = "http://127.0.0.1:11434"
 // Model is one decision model on a local Ollama server, checked against an allowlist,
 // with the server version and model digest recorded when it was opened.
 type Model struct {
-	// Name is the model name as given, for example "clef" or "clef:latest".
+	// Name is the model name as given, for example "sprout" or "sprout:latest".
 	Name string
 	// Digest is the model's digest on the server when it was opened.
 	Digest string
