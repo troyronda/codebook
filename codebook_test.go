@@ -14,7 +14,7 @@ import (
 	"github.com/troyronda/codebook"
 	"github.com/troyronda/codebook/internal/fakeollama"
 	"github.com/troyronda/codebook/internal/systemone"
-	"github.com/troyronda/egress"
+	"github.com/troyronda/modelguard"
 )
 
 const (
@@ -42,7 +42,7 @@ func open(t *testing.T, s *fakeollama.Server, name string) *codebook.Model {
 
 func openWith(t *testing.T, s *fakeollama.Server, name string, allow ...string) (*codebook.Model, error) {
 	t.Helper()
-	return codebook.Open(context.Background(), codebook.Endpoint{URL: s.URL}, s.Egress(filepath.Join(t.TempDir(), "egress.jsonl"), allow...), name)
+	return codebook.Open(context.Background(), codebook.Endpoint{URL: s.URL}, s.Guard(filepath.Join(t.TempDir(), "modelguard.jsonl"), allow...), name)
 }
 
 func load(t *testing.T) *codebook.Codebook {
@@ -125,17 +125,17 @@ func TestRemoteModelRefused(t *testing.T) {
 	}
 }
 
-func TestRequestsGoThroughEgress(t *testing.T) {
+func TestRequestsGoThroughModelguard(t *testing.T) {
 	s := newServer(t)
-	eg := s.Egress(filepath.Join(t.TempDir(), "egress.jsonl"), "sprout")
-	// An endpoint the egress config doesn't allow is refused before any request.
+	eg := s.Guard(filepath.Join(t.TempDir(), "modelguard.jsonl"), "sprout")
+	// An endpoint the modelguard config doesn't allow is refused before any request.
 	for _, ep := range []string{"http://192.0.2.5:11434", "https://ollama.example"} {
 		_, err := codebook.Open(context.Background(), codebook.Endpoint{URL: ep}, eg, "sprout")
-		if !errors.Is(err, egress.ErrRefused) {
-			t.Errorf("Open(%s) = %v, want an egress refusal", ep, err)
+		if !errors.Is(err, modelguard.ErrRefused) {
+			t.Errorf("Open(%s) = %v, want a modelguard refusal", ep, err)
 		}
 	}
-	// The allowed server works, and every request is in the egress log.
+	// The allowed server works, and every request is in the modelguard log.
 	m, err := codebook.Open(context.Background(), codebook.Endpoint{URL: s.URL}, eg, "sprout")
 	if err != nil {
 		t.Fatal(err)
@@ -146,11 +146,11 @@ func TestRequestsGoThroughEgress(t *testing.T) {
 	log, _ := os.ReadFile(eg.Log)
 	for _, path := range []string{"/api/version", "/api/tags", "/v1/systemone"} {
 		if !strings.Contains(string(log), `"path":"`+path+`"`) {
-			t.Errorf("egress log has no %s request", path)
+			t.Errorf("modelguard log has no %s request", path)
 		}
 	}
 	if strings.Contains(string(log), "beans") {
-		t.Error("egress log holds document text")
+		t.Error("modelguard log holds document text")
 	}
 }
 
@@ -165,7 +165,7 @@ func TestOtherEndpoint(t *testing.T) {
 	s := newServer(t)
 	s.Models["sprout"] = "" // no provenance lookups happen for other endpoints
 	ep := codebook.Endpoint{URL: s.URL, Kind: codebook.KindOther, APIKeyCommand: []string{"echo", "made-up-key"}}
-	m, err := codebook.Open(context.Background(), ep, s.Egress(filepath.Join(t.TempDir(), "e.jsonl"), "sprout"), "sprout")
+	m, err := codebook.Open(context.Background(), ep, s.Guard(filepath.Join(t.TempDir(), "e.jsonl"), "sprout"), "sprout")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestOtherEndpoint(t *testing.T) {
 func TestAPIKeyCommandFailure(t *testing.T) {
 	s := newServer(t)
 	ep := codebook.Endpoint{URL: s.URL, APIKeyCommand: []string{"false"}}
-	if _, err := codebook.Open(context.Background(), ep, s.Egress(filepath.Join(t.TempDir(), "e.jsonl"), "sprout"), "sprout"); err == nil {
+	if _, err := codebook.Open(context.Background(), ep, s.Guard(filepath.Join(t.TempDir(), "e.jsonl"), "sprout"), "sprout"); err == nil {
 		t.Error("a failing key command was ignored")
 	}
 }

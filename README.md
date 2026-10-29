@@ -12,7 +12,7 @@ The name and the method come from qualitative research. A codebook defines each 
 - **eval** applies the codebook to a spread sample of a folder's Markdown files and writes a CSV with an empty `correct` column. A person fills it with `y` or `n`.
 - **agree** reads the labelled CSV and prints agreement by question, by folder and by confidence band, misses on critical questions, and proposed gate thresholds.
 
-Every request goes through an [egress](https://github.com/troyronda/egress) client: only loopback and the hosts, address ranges and ports in its config, and only allowlisted models; any model name containing `cloud` is refused. By default that's a local Ollama server on loopback. For an Ollama endpoint every result records the server version and the model's digest, and opening a model on a server version the tests weren't recorded against prints a warning; for other endpoints it records the endpoint and the model name each response reports. Every result records the codebook's hash. Output names files and reports labels, probabilities and counts, never document text.
+Every request goes through a [modelguard](https://github.com/troyronda/modelguard) client: only loopback and the hosts, address ranges and ports in its config, and only allowlisted models; any model name containing `cloud` is refused. By default that's a local Ollama server on loopback. For an Ollama endpoint every result records the server version and the model's digest, and opening a model on a server version the tests weren't recorded against prints a warning; for other endpoints it records the endpoint and the model name each response reports. Every result records the codebook's hash. Output names files and reports labels, probabilities and counts, never document text.
 
 ## Codebook format
 
@@ -59,8 +59,8 @@ codebook run -codebook codebook.yaml -model MODEL -allow MODEL,LARGER \
 codebook eval -codebook codebook.yaml -model MODEL -allow MODEL \
   [-n 50] [-seed 1] [-max-chars 20000] [-skip attachments] -out eval.csv DIR
 
-# Another endpoint: name it, and pass an egress config that allows it.
-codebook run -codebook codebook.yaml -model MODEL -egress egress.json \
+# Another endpoint: name it, and pass a modelguard config that allows it.
+codebook run -codebook codebook.yaml -model MODEL -modelguard modelguard.json \
   -endpoint https://systemone.example -endpoint-kind other \
   -api-key-command "your-secret-tool get systemone-key" FILE...
 
@@ -70,7 +70,7 @@ codebook agree -codebook codebook.yaml [-group notes/,reading/] [-json] eval.csv
 
 `eval` leaves out hidden folders, the folders named in `-skip`, iCloud conflict copies (`name 2.md` beside `name.md`) and files changed in the last 60 seconds. It sends at most `-max-chars` characters of each file, marks cut files in the `truncated` column, and writes the run's model, digest, server version and codebook hash to `eval.csv.meta.json`.
 
-`-allow` builds a loopback-only egress config for the endpoint's port, logging to `codebook/egress.jsonl` in the user cache folder (`-egress-log` to change it). `-egress FILE` uses a full egress config instead, whose `models` are the allowlist. The endpoint can also be set in the codebook file:
+`-allow` builds a loopback-only modelguard config for the endpoint's port, logging to `codebook/modelguard.jsonl` in the user cache folder (`-modelguard-log` to change it). `-modelguard FILE` uses a full modelguard config instead, whose `models` are the allowlist. The endpoint can also be set in the codebook file:
 
 ```yaml
 endpoint:
@@ -87,7 +87,7 @@ The API key is only ever read by running that command; it never appears in a fil
 
 ```go
 cb, err := codebook.Load("codebook.yaml")      // or codebook.New(name, gate, questions)
-eg, err := egress.Load("egress.json")           // or an egress.Config built in code
+eg, err := modelguard.Load("modelguard.json")           // or a modelguard.Config built in code
 m, err := codebook.Open(ctx, codebook.Endpoint{}, eg, "MODEL") // zero Endpoint: local Ollama
 res, err := cb.WithModel(m).Apply(ctx, codebook.Document{Path: path, Text: text})
 ```

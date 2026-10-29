@@ -14,7 +14,7 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/troyronda/egress"
+	"github.com/troyronda/modelguard"
 
 	"github.com/troyronda/codebook/internal/systemone"
 )
@@ -72,12 +72,12 @@ func New(models map[string]string) *Server {
 	return s
 }
 
-// Egress returns an egress config that allows this server's port and the
+// Guard returns a modelguard config that allows this server's port and the
 // given models, logging to log.
-func (s *Server) Egress(log string, models ...string) egress.Config {
+func (s *Server) Guard(log string, models ...string) modelguard.Config {
 	u, _ := url.Parse(s.URL)
 	p, _ := strconv.Atoi(u.Port())
-	return egress.Config{Ports: []uint16{uint16(p)}, Models: models, Log: log}
+	return modelguard.Config{Ports: []uint16{uint16(p)}, Models: models, Log: log}
 }
 
 // Auth returns the Authorization header of the last System One request.

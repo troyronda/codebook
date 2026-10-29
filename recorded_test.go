@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/troyronda/codebook"
-	"github.com/troyronda/egress"
+	"github.com/troyronda/modelguard"
 )
 
 // Recordings are real responses from a local Ollama server to the made-up
@@ -163,7 +163,7 @@ func openAt(t *testing.T, base, model string) *codebook.Model {
 	t.Helper()
 	u, _ := url.Parse(base)
 	p, _ := strconv.Atoi(u.Port())
-	eg := egress.Config{Ports: []uint16{uint16(p)}, Models: []string{model}, Log: filepath.Join(t.TempDir(), "egress.jsonl")}
+	eg := modelguard.Config{Ports: []uint16{uint16(p)}, Models: []string{model}, Log: filepath.Join(t.TempDir(), "modelguard.jsonl")}
 	m, err := codebook.Open(context.Background(), codebook.Endpoint{URL: base}, eg, model)
 	if err != nil {
 		t.Fatal(err)

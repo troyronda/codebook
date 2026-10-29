@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/troyronda/egress"
+	"github.com/troyronda/modelguard"
 )
 
 // Model is one decision model at one endpoint, checked against an allowlist,
@@ -46,11 +46,11 @@ func CheckAllowed(name string, allow []string) error {
 	return nil
 }
 
-// Open checks name against the egress allowlist, builds an egress client from
+// Open checks name against the modelguard allowlist, builds a modelguard client from
 // eg (every request codebook makes goes through it), fetches the API key if
 // the endpoint names a command, and records provenance: the server version and
 // model digest for an Ollama endpoint.
-func Open(ctx context.Context, ep Endpoint, eg egress.Config, name string) (*Model, error) {
+func Open(ctx context.Context, ep Endpoint, eg modelguard.Config, name string) (*Model, error) {
 	ep = ep.Or(Endpoint{})
 	if err := ep.validate(); err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func Open(ctx context.Context, ep Endpoint, eg egress.Config, name string) (*Mod
 	if err := CheckAllowed(name, eg.Models); err != nil {
 		return nil, err
 	}
-	hc, err := egress.NewHTTPClient(eg)
+	hc, err := modelguard.NewHTTPClient(eg)
 	if err != nil {
 		return nil, err
 	}

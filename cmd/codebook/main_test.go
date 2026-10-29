@@ -36,7 +36,7 @@ func fake(t *testing.T) *fakeollama.Server {
 
 func cmd(t *testing.T, stdin string, args ...string) (string, string, error) {
 	t.Helper()
-	home := t.TempDir() // the default egress log goes in the user cache folder
+	home := t.TempDir() // the default modelguard log goes in the user cache folder
 	t.Setenv("HOME", home)
 	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 	var out, errOut bytes.Buffer
