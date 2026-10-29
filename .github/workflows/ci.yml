@@ -4,17 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    - cron: "17 6 * * 1" # Mondays: govulncheck, so a new advisory fails even an idle repo
 
 permissions:
   contents: read
 
 jobs:
   go:
-    uses: troyronda/.github/.github/workflows/go.yml@a7bd384a97eac09cfb14507b91fa2417a02fb7f6 # v0.1.0
-  private-terms:
-    if: github.event_name != 'schedule'
-    uses: troyronda/.github/.github/workflows/private-terms.yml@a7bd384a97eac09cfb14507b91fa2417a02fb7f6 # v0.1.0
-    secrets:
-      PRIVATE_TERMS: ${{ secrets.PRIVATE_TERMS }}
+    uses: troyronda/.github/.github/workflows/go.yml@main

@@ -9,6 +9,3 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-    ignore:
-      # Pins to the shared workflows are bumped by hand when they're released.
-      - dependency-name: "troyronda/.github*"
