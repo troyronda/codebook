@@ -3,7 +3,6 @@ package codebook_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"math"
 	"os"
 	"path/filepath"
@@ -14,7 +13,6 @@ import (
 	"github.com/troyronda/codebook"
 	"github.com/troyronda/codebook/internal/fakeollama"
 	"github.com/troyronda/codebook/internal/systemone"
-	"github.com/troyronda/modelguard"
 )
 
 const (
@@ -22,27 +20,25 @@ const (
 	large = "oak:latest"
 )
 
-var allow = []string{"sprout", "oak"}
-
 func newServer(t *testing.T) *fakeollama.Server {
 	t.Helper()
-	s := fakeollama.New(map[string]string{small: "sha256:aaa", large: "sha256:bbb", "fern-cloud:latest": "sha256:ccc"})
+	s := fakeollama.New(map[string]string{small: "sha256:aaa", large: "sha256:bbb"})
 	t.Cleanup(s.Close)
 	return s
 }
 
 func open(t *testing.T, s *fakeollama.Server, name string) *codebook.Model {
 	t.Helper()
-	m, err := openWith(t, s, name, allow...)
+	m, err := openWith(t, s, name)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return m
 }
 
-func openWith(t *testing.T, s *fakeollama.Server, name string, allow ...string) (*codebook.Model, error) {
+func openWith(t *testing.T, s *fakeollama.Server, name string) (*codebook.Model, error) {
 	t.Helper()
-	return codebook.Open(context.Background(), codebook.Endpoint{URL: s.URL}, s.Guard(filepath.Join(t.TempDir(), "modelguard.jsonl"), allow...), name)
+	return codebook.Open(context.Background(), codebook.Endpoint{URL: s.URL}, name)
 }
 
 func load(t *testing.T) *codebook.Codebook {
@@ -81,76 +77,31 @@ func TestParseRejects(t *testing.T) {
 	}
 }
 
-func TestCheckAllowed(t *testing.T) {
-	for _, tc := range []struct {
-		name  string
-		allow []string
-		ok    bool
-	}{
-		{"sprout", allow, true},
-		{"sprout:latest", allow, true},
-		{"oak:7b", allow, false},
-		{"oak:7b", []string{"oak:7b"}, true},
-		{"fern:cloud", []string{"fern:cloud"}, false},
-		{"fern-cloud", []string{"fern-cloud"}, false},
-		{"CLOUDY", []string{"CLOUDY"}, false},
-		{"sprout", nil, false},
+func TestOllamaHost(t *testing.T) {
+	for env, want := range map[string]string{
+		"":                       codebook.DefaultURL,
+		"127.0.0.1:11500":        "http://127.0.0.1:11500",
+		"example.lan":            "http://example.lan:11434",
+		"0.0.0.0":                "http://0.0.0.0:11434",
+		"[::1]:11434":            "http://[::1]:11434",
+		"http://box.example":     "http://box.example:80",
+		"https://box.example":    "https://box.example:443",
+		"https://box.example:99": "https://box.example:99",
 	} {
-		err := codebook.CheckAllowed(tc.name, tc.allow)
-		if (err == nil) != tc.ok {
-			t.Errorf("CheckAllowed(%q, %v) = %v, want ok=%v", tc.name, tc.allow, err, tc.ok)
-		}
-		if err != nil && !errors.Is(err, codebook.ErrNotAllowed) {
-			t.Errorf("CheckAllowed(%q): error %v is not ErrNotAllowed", tc.name, err)
+		t.Setenv("OLLAMA_HOST", env)
+		if got := codebook.OllamaURL(); got != want {
+			t.Errorf("OLLAMA_HOST=%q: got %s, want %s", env, got, want)
 		}
 	}
-}
-
-func TestCloudModelNeverRuns(t *testing.T) {
+	// The zero Endpoint uses it; an explicit URL wins.
 	s := newServer(t)
-	_, err := openWith(t, s, "fern-cloud", "fern-cloud")
-	if !errors.Is(err, codebook.ErrNotAllowed) {
-		t.Fatalf("OpenModel(cloud) = %v, want ErrNotAllowed", err)
+	t.Setenv("OLLAMA_HOST", strings.TrimPrefix(s.URL, "http://"))
+	m, err := codebook.Open(context.Background(), codebook.Endpoint{}, "sprout")
+	if err != nil || m.Endpoint.URL != s.URL {
+		t.Errorf("zero Endpoint with OLLAMA_HOST: %v, %v", m, err)
 	}
-	if n := len(s.Requests()); n != 0 {
-		t.Fatalf("%d requests reached the server", n)
-	}
-}
-
-func TestRemoteModelRefused(t *testing.T) {
-	s := newServer(t)
-	s.Remote[large] = true
-	if _, err := openWith(t, s, "oak", allow...); !errors.Is(err, codebook.ErrNotAllowed) {
-		t.Fatalf("OpenModel(remote) = %v, want ErrNotAllowed", err)
-	}
-}
-
-func TestRequestsGoThroughModelguard(t *testing.T) {
-	s := newServer(t)
-	eg := s.Guard(filepath.Join(t.TempDir(), "modelguard.jsonl"), "sprout")
-	// An endpoint the modelguard config doesn't allow is refused before any request.
-	for _, ep := range []string{"http://192.0.2.5:11434", "https://ollama.example"} {
-		_, err := codebook.Open(context.Background(), codebook.Endpoint{URL: ep}, eg, "sprout")
-		if !errors.Is(err, modelguard.ErrRefused) {
-			t.Errorf("Open(%s) = %v, want a modelguard refusal", ep, err)
-		}
-	}
-	// The allowed server works, and every request is in the modelguard log.
-	m, err := codebook.Open(context.Background(), codebook.Endpoint{URL: s.URL}, eg, "sprout")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := load(t).WithModel(m).Apply(context.Background(), codebook.Document{Path: "a.md", Text: "beans"}); err != nil {
-		t.Fatal(err)
-	}
-	log, _ := os.ReadFile(eg.Log)
-	for _, path := range []string{"/api/version", "/api/tags", "/v1/systemone"} {
-		if !strings.Contains(string(log), `"path":"`+path+`"`) {
-			t.Errorf("modelguard log has no %s request", path)
-		}
-	}
-	if strings.Contains(string(log), "beans") {
-		t.Error("modelguard log holds document text")
+	if got := (codebook.Endpoint{URL: "http://other.example:1"}).Or(codebook.Endpoint{}).URL; got != "http://other.example:1" {
+		t.Errorf("explicit URL lost: %s", got)
 	}
 }
 
@@ -165,7 +116,7 @@ func TestOtherEndpoint(t *testing.T) {
 	s := newServer(t)
 	s.Models["sprout"] = "" // no provenance lookups happen for other endpoints
 	ep := codebook.Endpoint{URL: s.URL, Kind: codebook.KindOther, APIKeyCommand: []string{"echo", "made-up-key"}}
-	m, err := codebook.Open(context.Background(), ep, s.Guard(filepath.Join(t.TempDir(), "e.jsonl"), "sprout"), "sprout")
+	m, err := codebook.Open(context.Background(), ep, "sprout")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +135,7 @@ func TestOtherEndpoint(t *testing.T) {
 func TestAPIKeyCommandFailure(t *testing.T) {
 	s := newServer(t)
 	ep := codebook.Endpoint{URL: s.URL, APIKeyCommand: []string{"false"}}
-	if _, err := codebook.Open(context.Background(), ep, s.Guard(filepath.Join(t.TempDir(), "e.jsonl"), "sprout"), "sprout"); err == nil {
+	if _, err := codebook.Open(context.Background(), ep, "sprout"); err == nil {
 		t.Error("a failing key command was ignored")
 	}
 }
@@ -218,7 +169,7 @@ func TestOpenModelRecordsVersionAndDigest(t *testing.T) {
 	if m.ServerVersion != fakeollama.Version || m.Digest != "sha256:aaa" {
 		t.Fatalf("got version %q digest %q", m.ServerVersion, m.Digest)
 	}
-	if _, err := openWith(t, newServer(t), "sprout:big", "sprout:big"); err == nil {
+	if _, err := openWith(t, newServer(t), "sprout:big"); err == nil {
 		t.Fatal("opened a model the server doesn't have")
 	}
 }

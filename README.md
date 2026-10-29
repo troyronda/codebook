@@ -12,12 +12,13 @@ The name and the method come from qualitative research. A codebook defines each 
 - **eval** applies the codebook to a spread sample of a folder's Markdown files and writes a CSV with an empty `correct` column. A person fills it with `y` or `n`.
 - **agree** reads the labelled CSV and prints agreement by question, by folder and by confidence band, misses on critical questions, and proposed gate thresholds.
 
-Every request goes through a [modelguard](https://github.com/troyronda/modelguard) client: only loopback and the hosts, address ranges and ports in its config, and only allowlisted models; any model name containing `cloud` is refused. By default that's a local Ollama server on loopback. For an Ollama endpoint every result records the server version and the model's digest, and opening a model on a server version the tests weren't recorded against prints a warning; for other endpoints it records the endpoint and the model name each response reports. Every result records the codebook's hash. Output names files and reports labels, probabilities and counts, never document text.
+Requests go to the Ollama server it's given: `-endpoint`, else the codebook file's `endpoint`, else `OLLAMA_HOST` (read as Ollama's own client reads it), else `http://127.0.0.1:11434`. The codebook file's `model` names the decision model. Which servers and models are allowed is the server's business: configure Ollama for that. For an Ollama endpoint every result records the server version and the model's digest, and opening a model on a server version the tests weren't recorded against prints a warning; for other endpoints it records the endpoint and the model name each response reports. Every result records the codebook's hash. Output names files and reports labels, probabilities and counts, never document text.
 
 ## Codebook format
 
 ```yaml
 name: garden-notes
+model: sprout                                # the decision model
 gate: {accept: 0.8, escalate: 0.5, flag: 0.2} # optional; these are the defaults
 questions:
   - name: topic
@@ -52,15 +53,15 @@ Confidence is the server's measure of how strongly the model favours one label (
 go install github.com/troyronda/codebook/cmd/codebook@latest
 
 # Apply to files (or to paths on stdin, one per line); one JSON result per line.
-codebook run -codebook codebook.yaml -model MODEL -allow MODEL,LARGER \
+codebook run -codebook codebook.yaml \
   [-escalate-model LARGER] [-log disagreements.jsonl] [-max-chars N] FILE...
 
 # Sample 50 Markdown files across a folder's top-level folders and write a CSV to label.
-codebook eval -codebook codebook.yaml -model MODEL -allow MODEL \
+codebook eval -codebook codebook.yaml \
   [-n 50] [-seed 1] [-max-chars 20000] [-skip attachments] -out eval.csv DIR
 
-# Another endpoint: name it, and pass a modelguard config that allows it.
-codebook run -codebook codebook.yaml -model MODEL -modelguard modelguard.json \
+# Another endpoint.
+codebook run -codebook codebook.yaml \
   -endpoint https://systemone.example -endpoint-kind other \
   -api-key-command "your-secret-tool get systemone-key" FILE...
 
@@ -70,7 +71,7 @@ codebook agree -codebook codebook.yaml [-group notes/,reading/] [-json] eval.csv
 
 `eval` leaves out hidden folders, the folders named in `-skip`, iCloud conflict copies (`name 2.md` beside `name.md`) and files changed in the last 60 seconds. It sends at most `-max-chars` characters of each file, marks cut files in the `truncated` column, and writes the run's model, digest, server version and codebook hash to `eval.csv.meta.json`.
 
-`-allow` builds a loopback-only modelguard config for the endpoint's port, logging to `codebook/modelguard.jsonl` in the user cache folder (`-modelguard-log` to change it). `-modelguard FILE` uses a full modelguard config instead, whose `models` are the allowlist. The endpoint can also be set in the codebook file:
+The endpoint can also be set in the codebook file:
 
 ```yaml
 endpoint:
@@ -87,8 +88,7 @@ The API key is only ever read by running that command; it never appears in a fil
 
 ```go
 cb, err := codebook.Load("codebook.yaml")      // or codebook.New(name, gate, questions)
-eg, err := modelguard.Load("modelguard.json")           // or a modelguard.Config built in code
-m, err := codebook.Open(ctx, codebook.Endpoint{}, eg, "MODEL") // zero Endpoint: local Ollama
+m, err := codebook.Open(ctx, codebook.Endpoint{}, cb.ModelName) // zero Endpoint: OLLAMA_HOST, else local Ollama
 res, err := cb.WithModel(m).Apply(ctx, codebook.Document{Path: path, Text: text})
 ```
 

@@ -1,5 +1,6 @@
 # A made-up codebook for tests.
 name: garden-notes
+model: sprout
 gate:
   accept: 0.8
   escalate: 0.5

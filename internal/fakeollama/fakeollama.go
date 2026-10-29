@@ -10,11 +10,8 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"strconv"
 	"sync"
-
-	"github.com/troyronda/modelguard"
 
 	"github.com/troyronda/codebook/internal/systemone"
 )
@@ -29,10 +26,8 @@ type AnswerFunc func(model, state, name string, q systemone.SystemOneQuestion) a
 // Server is a fake Ollama server.
 type Server struct {
 	*httptest.Server
-	// Models maps model names (with tag) to digests. Remote marks models the server
-	// would forward to another host.
+	// Models maps model names (with tag) to digests.
 	Models map[string]string
-	Remote map[string]bool
 	// Answer answers each question; Hashed by default.
 	Answer AnswerFunc
 
@@ -43,41 +38,28 @@ type Server struct {
 
 // New starts a fake server with the given models. Close it when done.
 func New(models map[string]string) *Server {
-	s := &Server{Models: models, Remote: map[string]bool{}, Answer: Hashed}
+	s := &Server{Models: models, Answer: Hashed}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/version", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, map[string]string{"version": Version})
 	})
 	mux.HandleFunc("GET /api/tags", func(w http.ResponseWriter, r *http.Request) {
 		type model struct {
-			Name       string `json:"name"`
-			Model      string `json:"model"`
-			Digest     string `json:"digest"`
-			RemoteHost string `json:"remote_host,omitempty"`
+			Name   string `json:"name"`
+			Model  string `json:"model"`
+			Digest string `json:"digest"`
 		}
 		var list struct {
 			Models []model `json:"models"`
 		}
 		for name, digest := range s.Models {
-			m := model{Name: name, Model: name, Digest: digest}
-			if s.Remote[name] {
-				m.RemoteHost = "https://remote.example"
-			}
-			list.Models = append(list.Models, m)
+			list.Models = append(list.Models, model{Name: name, Model: name, Digest: digest})
 		}
 		writeJSON(w, list)
 	})
 	mux.HandleFunc("POST /v1/systemone", s.systemOne)
 	s.Server = httptest.NewServer(mux)
 	return s
-}
-
-// Guard returns a modelguard config that allows this server's port and the
-// given models, logging to log.
-func (s *Server) Guard(log string, models ...string) modelguard.Config {
-	u, _ := url.Parse(s.URL)
-	p, _ := strconv.Atoi(u.Port())
-	return modelguard.Config{Ports: []uint16{uint16(p)}, Models: models, Log: log}
 }
 
 // Auth returns the Authorization header of the last System One request.

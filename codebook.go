@@ -51,6 +51,9 @@ type Codebook struct {
 	// an answer can always be traced to the exact definitions the model was given.
 	Hash string `yaml:"-"`
 
+	// ModelName is the decision model the codebook is applied with.
+	ModelName string `yaml:"model" json:"model,omitempty"`
+
 	// Endpoint, if set in the file, is where requests go unless the caller
 	// passes its own.
 	Endpoint Endpoint `yaml:"endpoint"`

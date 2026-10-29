@@ -14,8 +14,7 @@ import (
 // responses came from. Opening a model on another version adds a warning.
 var TestedVersions = []string{"0.40.11"}
 
-// ollamaProvenance returns the server version and the model's digest, and
-// refuses a model the server would forward to a remote host.
+// ollamaProvenance returns the server version and the model's digest.
 func ollamaProvenance(ctx context.Context, hc *http.Client, base, name string) (version, digest string, err error) {
 	var v struct {
 		Version string `json:"version"`
@@ -25,11 +24,9 @@ func ollamaProvenance(ctx context.Context, hc *http.Client, base, name string) (
 	}
 	var tags struct {
 		Models []struct {
-			Name        string `json:"name"`
-			Model       string `json:"model"`
-			Digest      string `json:"digest"`
-			RemoteHost  string `json:"remote_host"`
-			RemoteModel string `json:"remote_model"`
+			Name   string `json:"name"`
+			Model  string `json:"model"`
+			Digest string `json:"digest"`
 		} `json:"models"`
 	}
 	if err := getJSON(ctx, hc, base+"/api/tags", &tags); err != nil {
@@ -42,9 +39,6 @@ func ollamaProvenance(ctx context.Context, hc *http.Client, base, name string) (
 	for _, m := range tags.Models {
 		if m.Name != want && m.Model != want {
 			continue
-		}
-		if m.RemoteHost != "" || m.RemoteModel != "" {
-			return "", "", fmt.Errorf("%w: %q runs on a remote host", ErrNotAllowed, name)
 		}
 		if m.Digest == "" {
 			return "", "", fmt.Errorf("model %q has no digest", name)

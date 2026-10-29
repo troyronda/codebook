@@ -29,16 +29,13 @@ func checkNoText(t *testing.T, what, s string) {
 
 func fake(t *testing.T) *fakeollama.Server {
 	t.Helper()
-	s := fakeollama.New(map[string]string{"sprout:latest": "sha256:aaa", "oak:latest": "sha256:bbb", "fern:cloud": "sha256:ccc"})
+	s := fakeollama.New(map[string]string{"sprout:latest": "sha256:aaa", "oak:latest": "sha256:bbb"})
 	t.Cleanup(s.Close)
 	return s
 }
 
 func cmd(t *testing.T, stdin string, args ...string) (string, string, error) {
 	t.Helper()
-	home := t.TempDir() // the default modelguard log goes in the user cache folder
-	t.Setenv("HOME", home)
-	t.Setenv("XDG_CACHE_HOME", filepath.Join(home, ".cache"))
 	var out, errOut bytes.Buffer
 	err := run(context.Background(), args, strings.NewReader(stdin), &out, &errOut)
 	return out.String(), errOut.String(), err
@@ -48,7 +45,7 @@ func TestEvalThenAgree(t *testing.T) {
 	s := fake(t)
 	root := testvault.Copy(t, "../../testdata/notes")
 	csvPath := filepath.Join(t.TempDir(), "eval", "run.csv")
-	stdout, stderr, err := cmd(t, "", "eval", "-codebook", "../../testdata/codebook.yaml", "-model", "sprout", "-allow", "sprout,oak",
+	stdout, stderr, err := cmd(t, "", "eval", "-codebook", "../../testdata/codebook.yaml",
 		"-endpoint", s.URL, "-max-chars", "40", "-out", csvPath, root)
 	if err != nil {
 		t.Fatalf("eval: %v\n%s", err, stderr)
@@ -92,7 +89,7 @@ func TestEvalThenAgree(t *testing.T) {
 	}
 
 	// The same run again refuses to overwrite.
-	if _, _, err := cmd(t, "", "eval", "-codebook", "../../testdata/codebook.yaml", "-model", "sprout", "-allow", "sprout",
+	if _, _, err := cmd(t, "", "eval", "-codebook", "../../testdata/codebook.yaml",
 		"-endpoint", s.URL, "-out", csvPath, root); err == nil {
 		t.Error("eval overwrote an existing CSV")
 	}
@@ -127,7 +124,7 @@ func TestRun(t *testing.T) {
 	root := testvault.Copy(t, "../../testdata/notes")
 	a, b := filepath.Join(root, "journal", "walk.md"), filepath.Join(root, "chats", "squash.md")
 	logPath := filepath.Join(t.TempDir(), "disagreements.jsonl")
-	base := []string{"run", "-codebook", "../../testdata/codebook.yaml", "-model", "sprout", "-allow", "sprout,oak", "-endpoint", s.URL, "-log", logPath}
+	base := []string{"run", "-codebook", "../../testdata/codebook.yaml", "-endpoint", s.URL, "-log", logPath}
 
 	stdout, stderr, err := cmd(t, "", append(base, a, b)...)
 	if err != nil {
@@ -167,24 +164,17 @@ func TestRun(t *testing.T) {
 	}
 }
 
-func TestRunRefusesModels(t *testing.T) {
+func TestRunNeedsAModel(t *testing.T) {
 	s := fake(t)
-	for _, tc := range [][]string{
-		{"-model", "fern:cloud", "-allow", "fern:cloud"},
-		{"-model", "oak", "-allow", "sprout"},
-		{"-model", "sprout", "-allow", "sprout", "-escalate-model", "fern:cloud"},
-	} {
-		args := append([]string{"run", "-codebook", "../../testdata/codebook.yaml", "-endpoint", s.URL}, tc...)
-		if _, _, err := cmd(t, "", append(args, "../../testdata/notes/inbox-note.md")...); err == nil {
-			t.Errorf("%v ran", tc)
-		}
+	noModel := filepath.Join(t.TempDir(), "codebook.yaml")
+	b, _ := os.ReadFile("../../testdata/codebook.yaml")
+	os.WriteFile(noModel, []byte(strings.Replace(string(b), "model: sprout\n", "", 1)), 0o644)
+	if _, _, err := cmd(t, "", "run", "-codebook", noModel, "-endpoint", s.URL, "../../testdata/notes/inbox-note.md"); err == nil || !strings.Contains(err.Error(), "names no model") {
+		t.Errorf("codebook without a model: err = %v", err)
 	}
-	for _, r := range s.Requests() {
-		if strings.Contains(r.Model, "cloud") {
-			t.Errorf("a request reached the server for %q", r.Model)
-		}
-	}
-	if _, _, err := cmd(t, "", "run", "-codebook", "../../testdata/codebook.yaml", "-model", "sprout", "-allow", "sprout", "-endpoint", "http://192.0.2.1:11434", "x.md"); err == nil {
-		t.Error("ran against a non-loopback host")
+	unknown := filepath.Join(t.TempDir(), "codebook.yaml")
+	os.WriteFile(unknown, []byte(strings.Replace(string(b), "model: sprout", "model: fern", 1)), 0o644)
+	if _, _, err := cmd(t, "", "run", "-codebook", unknown, "-endpoint", s.URL, "../../testdata/notes/inbox-note.md"); err == nil {
+		t.Error("ran with a model the server doesn't have")
 	}
 }

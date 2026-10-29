@@ -5,13 +5,49 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
+	"os"
 	"os/exec"
 	"strings"
 )
 
 // DefaultURL is a local Ollama server.
 const DefaultURL = "http://127.0.0.1:11434"
+
+// OllamaURL returns the Ollama server named by OLLAMA_HOST, read as Ollama's
+// own client reads it ("host", "host:port" or "scheme://host:port"; port
+// 11434 unless an http or https scheme is given), or DefaultURL if unset.
+func OllamaURL() string {
+	s := strings.TrimSpace(os.Getenv("OLLAMA_HOST"))
+	if s == "" {
+		return DefaultURL
+	}
+	defaultPort := "11434"
+	scheme, hostport, ok := strings.Cut(s, "://")
+	switch {
+	case !ok:
+		scheme, hostport = "http", s
+	case scheme == "http":
+		defaultPort = "80"
+	case scheme == "https":
+		defaultPort = "443"
+	}
+	hostport, _, _ = strings.Cut(hostport, "/")
+	host, port, err := net.SplitHostPort(hostport)
+	if err != nil {
+		host, port = "127.0.0.1", defaultPort
+		if ip := net.ParseIP(strings.Trim(hostport, "[]")); ip != nil {
+			host = ip.String()
+		} else if hostport != "" {
+			host = hostport
+		}
+	}
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	return scheme + "://" + net.JoinHostPort(host, port)
+}
 
 // Endpoint kinds.
 const (
@@ -24,9 +60,10 @@ const (
 )
 
 // Endpoint is where System One requests go. A codebook file may name one; a
-// caller may pass one; the zero value is the local Ollama server.
+// caller may pass one; the zero value is the Ollama server named by
+// OLLAMA_HOST, else the local default.
 type Endpoint struct {
-	// URL is the server's base URL (DefaultURL if empty).
+	// URL is the server's base URL (OllamaURL() if empty).
 	URL string `yaml:"url" json:"url"`
 	// Kind is KindOllama (the default) or KindOther.
 	Kind string `yaml:"kind" json:"kind"`
@@ -48,7 +85,7 @@ func (e Endpoint) Or(fallback Endpoint) Endpoint {
 		e.APIKeyCommand = fallback.APIKeyCommand
 	}
 	if e.URL == "" {
-		e.URL = DefaultURL
+		e.URL = OllamaURL()
 	}
 	if e.Kind == "" {
 		e.Kind = KindOllama

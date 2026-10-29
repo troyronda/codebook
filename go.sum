@@ -1,4 +1,2 @@
-github.com/troyronda/modelguard v0.0.0-20261029000345-680a45919a03 h1:GTIEEHXNmdtLZN3OJLAuuMzwARZLpGoAkrc10xMINkI=
-github.com/troyronda/modelguard v0.0.0-20261029000345-680a45919a03/go.mod h1:e24+ffSiFVse5N9hA7Z/8n6hNnTF+ipsFjCeUA0a3+E=
 go.yaml.in/yaml/v3 v3.0.5 h1:N6y/pJk8buWs9NY5ERU2HSMfm+IuD/OtfdAnq6kESPw=
 go.yaml.in/yaml/v3 v3.0.5/go.mod h1:HVTZu1O7/Vkt2N+BFy8Zza+lnLsABggaTM2ZpNIGuKg=
