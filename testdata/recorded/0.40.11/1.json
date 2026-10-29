@@ -1,0 +1,88 @@
+{
+  "version": "0.40.11",
+  "model": "clef",
+  "digest": "039c167bd0ec3719dd055f448dd55ea2365330bc05f2737e042ea0d23659756b",
+  "request": {
+    "model": "clef",
+    "state": "tomatoes: try the yellow ones next year\n",
+    "questions": {
+      "topic": {
+        "type": "choice",
+        "instructions": "Which topic is this note mainly about?",
+        "criteria": {
+          "vegetables": "Growing food plants such as beans, squash or tomatoes.",
+          "soil": "Compost, mulch, soil tests or anything about what plants grow in.",
+          "tools": "Choosing, fixing or using garden tools."
+        }
+      },
+      "private": {
+        "type": "noul",
+        "instructions": "Does this note mention a neighbour by name?",
+        "criteria": {
+          "false": "No neighbour is named.",
+          "true": "A neighbour is named, even in passing."
+        }
+      },
+      "example": {
+        "type": "noul",
+        "instructions": "Does this note give a concrete example?",
+        "criteria": {
+          "false": "It stays general.",
+          "true": "It describes one specific thing that happened or was tried."
+        }
+      },
+      "finish": {
+        "type": "score",
+        "instructions": "How finished is this note?",
+        "criteria": [
+          "scrap: A fragment or a list of words.",
+          "draft: Full sentences with a point, but rough.",
+          "ready: A clear point, an example and a reason it matters."
+        ]
+      }
+    }
+  },
+  "response": {
+    "model": "clef",
+    "answers": {
+      "topic": {
+        "type": "choice",
+        "choice": "vegetables",
+        "probabilities": {
+          "vegetables": 0.9576412657841026,
+          "soil": 0.035570067948689284,
+          "tools": 0.00678866626720802
+        },
+        "confidence": 0.8234028953512433
+      },
+      "private": {
+        "type": "noul",
+        "noul": 0.015306354560694808
+      },
+      "example": {
+        "type": "noul",
+        "noul": 0.5602526536332625
+      },
+      "finish": {
+        "type": "score",
+        "score": 0.6545031243161772,
+        "legend": {
+          "0": "scrap: A fragment or a list of words.",
+          "1": "draft: Full sentences with a point, but rough.",
+          "2": "ready: A clear point, an example and a reason it matters."
+        },
+        "probabilities": {
+          "0": 0.43667130755207845,
+          "1": 0.47215426057966564,
+          "2": 0.09117443186825576
+        },
+        "confidence": 0.14937810046394906
+      }
+    },
+    "usage": {
+      "input_tokens": 450,
+      "output_tokens": 0
+    },
+    "prompt_eval_cached_count": 0
+  }
+}

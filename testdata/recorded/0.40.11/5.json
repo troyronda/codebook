@@ -1,0 +1,88 @@
+{
+  "version": "0.40.11",
+  "model": "clef",
+  "digest": "039c167bd0ec3719dd055f448dd55ea2365330bc05f2737e042ea0d23659756b",
+  "request": {
+    "model": "clef",
+    "state": "### Gardener\n\nWhy do my squash leaves go white?\n\n### Assistant\n\nPowdery mildew is the usual cause; water at the base and give the plants more space.\n",
+    "questions": {
+      "topic": {
+        "type": "choice",
+        "instructions": "Which topic is this note mainly about?",
+        "criteria": {
+          "vegetables": "Growing food plants such as beans, squash or tomatoes.",
+          "soil": "Compost, mulch, soil tests or anything about what plants grow in.",
+          "tools": "Choosing, fixing or using garden tools."
+        }
+      },
+      "private": {
+        "type": "noul",
+        "instructions": "Does this note mention a neighbour by name?",
+        "criteria": {
+          "false": "No neighbour is named.",
+          "true": "A neighbour is named, even in passing."
+        }
+      },
+      "example": {
+        "type": "noul",
+        "instructions": "Does this note give a concrete example?",
+        "criteria": {
+          "false": "It stays general.",
+          "true": "It describes one specific thing that happened or was tried."
+        }
+      },
+      "finish": {
+        "type": "score",
+        "instructions": "How finished is this note?",
+        "criteria": [
+          "scrap: A fragment or a list of words.",
+          "draft: Full sentences with a point, but rough.",
+          "ready: A clear point, an example and a reason it matters."
+        ]
+      }
+    }
+  },
+  "response": {
+    "model": "clef",
+    "answers": {
+      "topic": {
+        "type": "choice",
+        "choice": "vegetables",
+        "probabilities": {
+          "vegetables": 0.9541418352148319,
+          "soil": 0.040316057334799975,
+          "tools": 0.005542107450368251
+        },
+        "confidence": 0.8151862441035204
+      },
+      "private": {
+        "type": "noul",
+        "noul": 0.009783876017655003
+      },
+      "example": {
+        "type": "noul",
+        "noul": 0.25164770242862033
+      },
+      "finish": {
+        "type": "score",
+        "score": 0.9892387025564217,
+        "legend": {
+          "0": "scrap: A fragment or a list of words.",
+          "1": "draft: Full sentences with a point, but rough.",
+          "2": "ready: A clear point, an example and a reason it matters."
+        },
+        "probabilities": {
+          "0": 0.14319530940393457,
+          "1": 0.7243706786357094,
+          "2": 0.13243401196035615
+        },
+        "confidence": 0.29035983307528634
+      }
+    },
+    "usage": {
+      "input_tokens": 478,
+      "output_tokens": 0
+    },
+    "prompt_eval_cached_count": 36
+  }
+}

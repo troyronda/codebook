@@ -1,0 +1,1 @@
+- Sharpen a spade with a flat file, pushing away from the edge.
