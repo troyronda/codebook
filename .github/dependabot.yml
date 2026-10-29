@@ -1,10 +1,14 @@
 version: 2
 updates:
+  # Go modules are not updated here: security updates still arrive through
+  # Dependabot security updates, and versions are bumped by hand.
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
-  - package-ecosystem: gomod
-    directory: /
-    schedule:
-      interval: weekly
+      interval: monthly
+    groups:
+      actions:
+        patterns: ["*"]
+    ignore:
+      # Pins to the shared workflows are bumped by hand when they're released.
+      - dependency-name: "troyronda/.github*"
